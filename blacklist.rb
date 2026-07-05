@@ -1,0 +1,87 @@
+# frozen_string_literal: true
+
+# Parses and evaluates e621-style blacklist rules.
+#
+# Each non-blank, non-comment line is a rule.  Tags on the same line are AND'd
+# unless prefixed with ~ (OR group) or - (negation).  If a ~group exists, at
+# least one member must match.  If a -tag is present, the rule does NOT match.
+#
+#   gore                  → blacklist all gore posts
+#   female fox nude       → blacklist if ALL three are present
+#   pokémon -pikachu      → blacklist pokémon UNLESS pikachu is also present
+#   ~wolf ~lion           → blacklist if EITHER wolf OR lion is present
+#   rating:e              → blacklist all explicit posts
+#   id:12345              → blacklist a specific post
+#
+class Blacklist
+  Rule = Struct.new(:required, :optional_or, :forbidden)
+
+  def initialize(file)
+    @rules = []
+    load(file) if file && File.exist?(file)
+  end
+
+  def any?
+    @rules.any?
+  end
+
+  def blacklisted?(tag_set, rating, post_id)
+    @rules.any? { |rule| matches_rule?(rule, tag_set, rating, post_id) }
+  end
+
+  private
+
+  def load(file)
+    File.foreach(file) do |line|
+      line = line.strip
+      next if line.empty? || line.start_with?('#')
+
+      tags = line.split
+      required = []
+      optional_or = []
+      forbidden = []
+
+      tags.each do |tag|
+        if tag.start_with?('~')
+          optional_or << tag[1..]
+        elsif tag.start_with?('-')
+          forbidden << tag[1..]
+        else
+          required << tag
+        end
+      end
+
+      @rules << Rule.new(required, optional_or, forbidden)
+    end
+  end
+
+  RATING_ABBREV = { 'safe' => 's', 'questionable' => 'q', 'explicit' => 'e', 's' => 's', 'q' => 'q', 'e' => 'e' }.freeze
+
+  def tag_matches?(tag, tag_set, rating, post_id)
+    case tag
+    when /\Arating:(safe|questionable|explicit|[sqe])\z/ then rating == RATING_ABBREV[$1]
+    when /\Aid:(\d+)\z/ then post_id == $1.to_i
+    when /\A-userid:(\d+)\z/ then false
+    when /\Auserid:(\d+)\z/ then false
+    when /\A-uploader:(\d+)\z/ then false
+    when /\Auploader:(\d+)\z/ then false
+    else tag_set.include?(tag)
+    end
+  end
+
+  def matches_rule?(rule, tag_set, rating, post_id)
+    rule.required.each do |tag|
+      return false unless tag_matches?(tag, tag_set, rating, post_id)
+    end
+
+    if rule.optional_or.any?
+      return false unless rule.optional_or.any? { |tag| tag_matches?(tag, tag_set, rating, post_id) }
+    end
+
+    rule.forbidden.each do |tag|
+      return false if tag_matches?(tag, tag_set, rating, post_id)
+    end
+
+    true
+  end
+end
