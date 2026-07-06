@@ -53,8 +53,8 @@ options = {
   dry_run: false,
   verbose: false,
   json: false,
-  threads: 12,
-  rate_limit: 24
+  threads: 2,
+  rate_limit: 1
 }
 
 OptionParser.new do |opts|
