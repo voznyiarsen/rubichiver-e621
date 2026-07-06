@@ -64,7 +64,6 @@ Standard e621 blacklist syntax:
 
 ```
 gore -rating:s
-~comic porn
 rating:explicit
 ```
 
