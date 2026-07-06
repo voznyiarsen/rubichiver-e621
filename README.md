@@ -1,6 +1,6 @@
 # rubichiver-e621
 
-A Ruby CLI tool that downloads media from e621.net and writes XMP sidecar metadata files. Keeps files in their original format — no transcoding.
+A Ruby CLI tool that downloads media from e621.net and writes XMP sidecar metadata files.
 
 ## Features
 
@@ -20,7 +20,7 @@ A Ruby CLI tool that downloads media from e621.net and writes XMP sidecar metada
 ## Installation
 
 ```
-git clone https://github.com/your-username/rubichiver-e621.git
+git clone https://github.com/voznyiarsen/rubichiver-e621.git
 cd rubichiver-e621
 ```
 
