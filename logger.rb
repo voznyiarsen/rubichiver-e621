@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Canonical Logger for e621archiver
+# Canonical Logger for rubichiver-e621
 # Provides structured, leveled logging with consistent formatting
 # and optional JSON output for machine parsing.
 

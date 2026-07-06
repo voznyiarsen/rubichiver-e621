@@ -69,9 +69,9 @@ class PostProcessor
 
   def process_post(post, thread_idx)
     post_id = post['id']
-    file_ext = post.dig('file', 'ext') || 'unknown'
-    file_url = post.dig('file', 'url')
-    md5 = post.dig('file', 'md5')
+    file_ext = post.dig('files', 'meta', 'ext') || 'unknown'
+    file_url = post.dig('files', 'original', 'url')
+    md5 = post.dig('files', 'meta', 'md5')
 
     if $interrupted
       @interrupt_mutex.synchronize { @interrupt_skipped += 1 }
@@ -93,35 +93,22 @@ class PostProcessor
 
     existing_file = $existing_posts[post_id]
     if existing_file
-      existing_ext = File.extname(existing_file).delete('.').downcase
-
-      if VIDEO_EXTENSIONS.include?(existing_ext) && existing_ext != 'mp4'
-        log_info "Post #{post_id}: Found untagged video, transcoding to MP4", post_id: post_id, thread: thread_idx
-        mp4_file = File.join(@output_dir, "#{post_id}.mp4")
-        transcode_success = transcode_video(existing_file, mp4_file)
-        if transcode_success
-          existing_file = mp4_file
-        else
-          log_error "Post #{post_id}: Transcoding failed", post_id: post_id, thread: thread_idx
-          @stats.increment(:failed_files)
-          return
-        end
-      elsif file_has_xmp?(existing_file)
+      if sidecar_exists?(post_id)
         log_debug "Post #{post_id}: Already exists and tagged (Post ID: #{post_id})", post_id: post_id, thread: thread_idx
         @stats.increment(:skipped_files)
         return
       end
 
-      log_info "Post #{post_id}: Adding XMP metadata", post_id: post_id, thread: thread_idx
-      if add_xmp_tags(existing_file, post)
+      log_info "Post #{post_id}: Writing XMP sidecar", post_id: post_id, thread: thread_idx
+      if write_sidecar(existing_file, post)
         log_info "Post #{post_id}: Successfully archived (auto-tagged)", post_id: post_id, thread: thread_idx
         @stats.increment(:downloaded_files)
         return
       end
 
-      log_warn "Post #{post_id}: Corrupt file, removing and re-downloading", post_id: post_id, thread: thread_idx
-      File.delete(existing_file) if File.exist?(existing_file)
-      $existing_posts.delete(post_id)
+      log_error "Post #{post_id}: Failed to write sidecar", post_id: post_id, thread: thread_idx
+      @stats.increment(:failed_files)
+      return
     end
 
     output_file = File.join(@output_dir, "#{post_id}.#{file_ext}")
@@ -129,30 +116,12 @@ class PostProcessor
     success = download_media(file_url, output_file, post_id, md5, thread_idx: thread_idx)
 
     if success
-      if VIDEO_EXTENSIONS.include?(file_ext.downcase)
-        log_info "Post #{post_id}: Converting to MP4", post_id: post_id, thread: thread_idx
-        mp4_file = File.join(@output_dir, "#{post_id}.mp4")
-        transcode_success = transcode_video(output_file, mp4_file)
-
-        if transcode_success
-          File.delete(output_file) if File.exist?(output_file)
-          output_file = mp4_file
-          file_ext = 'mp4'
-        else
-          log_error "Post #{post_id}: Transcoding failed", post_id: post_id, thread: thread_idx
-          @stats.increment(:failed_files)
-          return
-        end
-      end
-
-      log_info "Post #{post_id}: Adding XMP metadata", post_id: post_id, thread: thread_idx
-      tag_success = add_xmp_tags(output_file, post)
-
-      if tag_success
+      log_info "Post #{post_id}: Writing XMP sidecar", post_id: post_id, thread: thread_idx
+      if write_sidecar(output_file, post)
         log_info "Post #{post_id}: Successfully archived", post_id: post_id, thread: thread_idx
         @stats.increment(:downloaded_files)
       else
-        log_error "Post #{post_id}: Failed to add XMP tags", post_id: post_id, thread: thread_idx
+        log_error "Post #{post_id}: Failed to write XMP sidecar", post_id: post_id, thread: thread_idx
         @stats.increment(:failed_files)
       end
     else

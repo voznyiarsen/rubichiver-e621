@@ -1,8 +1,8 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# e621 Media Archiver - Ruby version
-# Downloads media from e621, transcodes videos, and adds XMP metadata
+# rubichiver-e621 - e621 Media Archiver
+# Downloads media from e621 and writes XMP sidecar metadata
 
 require 'optparse'
 require 'fileutils'
@@ -38,10 +38,7 @@ RATING_LABELS = {
 # Tag categories for XMP
 TAG_CATEGORIES = %w[general artist contributor copyright character species invalid meta lore].freeze
 
-# Video formats to transcode to MP4 (images are left as-is)
-VIDEO_EXTENSIONS = %w[webm avi mov mkv flv wmv].freeze
-
-# File extensions that are not taggable with XMP and should be skipped
+# File extensions that are not supported and should be skipped
 UNSUPPORTED_EXTENSIONS = %w[swf].freeze
 
 # Global state
@@ -56,13 +53,13 @@ options = {
   dry_run: false,
   verbose: false,
   json: false,
-  threads: 6,
-  rate_limit: 3
+  threads: 12,
+  rate_limit: 24
 }
 
 OptionParser.new do |opts|
   opts.banner = <<~USAGE
-    Usage: e621archiver.rb [OPTIONS]
+    Usage: rubichiver-e621.rb [OPTIONS]
 
     Options:
       -o, --output DIR      Output directory (default: ./e6archive)
@@ -78,8 +75,8 @@ OptionParser.new do |opts|
       2. For each line, fetch matching posts from the e621 API (paginated, 320 per page)
       3. Filter posts against a blacklist file (e621 blacklist syntax)
       4. Download media files (images/videos)
-      5. Transcode video files (webm, avi, etc.) to MP4 using FFmpeg (NVIDIA GPU accelerated)
-      6. Tag media with XMP metadata containing tag categories and rating
+      5. Write XMP sidecar files with IPTC:Keywords (tags by category + rating)
+      6. No transcoding — media files are kept in their original format
   USAGE
 
   opts.on('-o', '--output DIR', 'Output directory') { |v| options[:output] = v }
@@ -158,6 +155,7 @@ $existing_posts = {}
 if Dir.exist?(output_dir)
   Dir.children(output_dir).each do |file|
     next if file.start_with?('.')
+    next if file.end_with?('.xmp')
     full = File.join(output_dir, file)
     next unless File.file?(full)
     if file =~ /\A(\d+)\./
@@ -196,25 +194,26 @@ end
 def api_search_posts(username, api_key, tags, page)
   cache_dir = File.join($output_dir, 'cache')
   FileUtils.mkdir_p(cache_dir)
-  query_hash = Digest::SHA256.hexdigest(tags.join(' '))
+  query_hash = Digest::SHA256.hexdigest("v2:" + tags.join(' '))
   cache_path = File.join(cache_dir, "api_posts_#{query_hash}_p#{page}.json")
 
   if File.exist?(cache_path)
     data = JSON.parse(File.read(cache_path))
-    log_debug "Using cached API response for: #{tags.join(' ')} (page #{page}, #{data['posts']&.size || 0} posts)"
+    log_debug "Using cached API response for: #{tags.join(' ')} (page #{page}, #{data&.size || 0} posts)"
     return data
   end
 
   $rate_limiter.throttle!
   uri = URI("#{API_BASE}/posts.json")
-  uri.query = URI.encode_www_form(tags: tags.join(' '), page: page, limit: 320)
+  uri.query = URI.encode_www_form(tags: tags.join(' '), page: page, limit: 320, v2: true, mode: 'extended')
 
   http = Net::HTTP.new(uri.host, uri.port)
   http.use_ssl = true
   http.open_timeout = 30
   http.read_timeout = 60
   request = Net::HTTP::Get.new(uri)
-  request['User-Agent'] = "e621archiver/1.0 (by #{username} on e621)"
+  request['User-Agent'] = "rubichiver-e621/1.0 (used by #{username} on e621)"
+  request['Accept-Encoding'] = 'identity'
 
   response = http.request(request)
   unless response.is_a?(Net::HTTPSuccess)
@@ -222,11 +221,12 @@ def api_search_posts(username, api_key, tags, page)
     return nil
   end
 
-  data = JSON.parse(response.body)
-  File.write(cache_path, JSON.pretty_generate(data))
-  log_debug "Cached API response: #{tags.join(' ')} (page #{page}, #{data['posts']&.size || 0} posts)"
-  data
-rescue JSON::ParserError => e
+  posts = JSON.parse(response.body)
+  posts = [] unless posts.is_a?(Array)
+  File.write(cache_path, JSON.pretty_generate(posts))
+  log_debug "Cached API response: #{tags.join(' ')} (page #{page}, #{posts.size} posts)"
+  posts
+rescue JSON::ParserError, Zlib::BufError => e
   log_error "Failed to parse API response", error: e.message
   nil
 end
@@ -240,10 +240,9 @@ def fetch_all_posts_for_query(username, api_key, query_tags, seen_ids, stats)
   page = 1
 
   loop do
-    data = api_search_posts(username, api_key, query_tags, page)
-    break unless data
+    posts = api_search_posts(username, api_key, query_tags, page)
+    break unless posts
 
-    posts = data['posts'] || []
     break if posts.empty?
 
     posts.each do |post|
@@ -260,7 +259,7 @@ def fetch_all_posts_for_query(username, api_key, query_tags, seen_ids, stats)
         next
       end
 
-      file_url = post.dig('file', 'url')
+      file_url = post.dig('files', 'original', 'url')
       next unless file_url
 
       seen_ids.add(post_id)
@@ -313,18 +312,23 @@ def download_media(url, output_file, post_id, expected_md5, thread_idx: nil)
     http.read_timeout = 30
 
     request = Net::HTTP::Get.new(uri)
-    request['User-Agent'] = "e621archiver/1.0"
+    request['User-Agent'] = "rubichiver-e621/1.0"
+    request['Accept-Encoding'] = 'identity'
 
-    response = http.request(request)
+    begin
+      response = http.request(request)
 
-    if response.is_a?(Net::HTTPSuccess)
-      File.open(output_file, 'wb') { |f| f.write(response.body) }
-      if verify_md5(output_file, expected_md5)
-        return true
-      else
-        log_error "MD5 mismatch for post #{post_id}", post_id: post_id, thread: thread_idx
-        File.delete(output_file) if File.exist?(output_file)
+      if response.is_a?(Net::HTTPSuccess)
+        File.open(output_file, 'wb') { |f| f.write(response.body) }
+        if verify_md5(output_file, expected_md5)
+          return true
+        else
+          log_error "MD5 mismatch for post #{post_id}", post_id: post_id, thread: thread_idx
+          File.delete(output_file) if File.exist?(output_file)
+        end
       end
+    rescue Zlib::BufError => e
+      log_debug "Download corrupted, retrying...", post_id: post_id, error: e.message, thread: thread_idx
     end
 
     retries += 1
@@ -346,89 +350,49 @@ def verify_md5(file, expected)
   Digest::MD5.file(file).hexdigest == expected
 end
 
-# Check if file already has XMP metadata tags
-def file_has_xmp?(file)
-  return false unless File.exist?(file)
-
-  stdout, _stderr, status = Open3.capture3('exiftool', '-XMP:Rating', '-XMP:Subject', '-s3', file)
-  status.success? && !stdout.strip.empty?
+# Check if a post already has an XMP sidecar
+def sidecar_exists?(post_id)
+  File.exist?(File.join($output_dir, "#{post_id}.xmp"))
 end
 
-# Transcode video to MP4 using FFmpeg
-def transcode_video(input_file, output_file)
-  has_nvidia = check_nvidia_gpu
-
-  cmd = ['ffmpeg', '-y']
-
-  if has_nvidia
-    cmd.concat([
-      '-hwaccel', 'cuda',
-      '-hwaccel_output_format', 'cuda'
-    ])
-  end
-
-  cmd.concat([
-    '-i', input_file,
-    '-c:v', has_nvidia ? 'h264_nvenc' : 'libx264',
-    '-preset', has_nvidia ? 'p6' : 'medium',
-    '-cq', '23',
-    '-c:a', 'copy',
-    '-rc', 'vbr',
-    '-b:v', '0'
-  ])
-
-  cmd << output_file
-
-  log_debug "FFmpeg command: #{cmd.join(' ')}", input_file: input_file, output_file: output_file, gpu_acceleration: has_nvidia
-
-  stdout, stderr, status = Open3.capture3(*cmd)
-
-  if status.success? && File.exist?(output_file)
-    File.delete(input_file) if File.exist?(input_file)
-    return true
-  end
-
-  log_error "Transcoding failed: #{stderr}", input_file: input_file, output_file: output_file, stderr: stderr
-  false
-end
-
-# Check if NVIDIA GPU is available
-def check_nvidia_gpu
-  stdout, _stderr, status = Open3.capture3('nvidia-smi', '-L')
-  status.success? && stdout.include?('GPU')
-end
-
-# Add XMP metadata tags to file using exiftool
-def add_xmp_tags(file, post)
-  return false unless File.exist?(file)
+# Write XMP sidecar file with IPTC:Keywords and XMP:Rating tags
+def write_sidecar(media_file, post)
+  post_id = post['id']
+  sidecar = File.join($output_dir, "#{post_id}.xmp")
 
   rating_label = RATING_LABELS[post['rating']]
   return false unless rating_label
 
   rating_value = RATING_MAP[post['rating']]
 
-  args = ['-overwrite_original']
+  File.delete(sidecar) if File.exist?(sidecar)
+
+  args = ['-o', sidecar]
   args << "-XMP:Rating=#{rating_value}"
-  args << "-XMP:Subject+=rating:#{rating_label}"
+  args << "-IPTC:Keywords+=rating:#{rating_label}"
 
   TAG_CATEGORIES.each do |category|
     tags = post.dig('tags', category) || []
     tags.each do |tag|
-      args << "-XMP:Subject+=#{category}:#{tag}"
+      args << "-IPTC:Keywords+=#{category}:#{tag}"
     end
   end
 
-  args << file
+  args << media_file
 
   stdout, stderr, status = Open3.capture3('exiftool', *args)
 
-  if status.success?
+  if status.success? && File.exist?(sidecar)
     true
   else
-    log_error "exiftool XMP write failed: #{stderr}", file: file, post_id: post['id'], stderr: stderr
+    log_error "exiftool sidecar write failed: #{stderr}", sidecar: sidecar, post_id: post_id, stderr: stderr
     false
   end
 end
+
+
+
+
 
 # Main execution
 def main
