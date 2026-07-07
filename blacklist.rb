@@ -31,6 +31,8 @@ class Blacklist
 
   private
 
+  UNSUPPORTED_TAG = /\A-?(?:userid|uploader):\d+\z/.freeze
+
   def load(file)
     File.foreach(file) do |line|
       line = line.strip
@@ -40,8 +42,13 @@ class Blacklist
       required = []
       optional_or = []
       forbidden = []
+      unsupported = []
 
       tags.each do |tag|
+        if tag.match?(UNSUPPORTED_TAG)
+          unsupported << tag
+          next
+        end
         if tag.start_with?('~')
           optional_or << tag[1..]
         elsif tag.start_with?('-')
@@ -50,6 +57,14 @@ class Blacklist
           required << tag
         end
       end
+
+      if unsupported.any?
+        log_warn "Blacklist rule contains unsupported tag(s), ignored", rule: line, ignored: unsupported.join(', ')
+      end
+
+      # A rule with no supported components would match every post; skip it
+      # rather than blacklisting everything.
+      next if required.empty? && optional_or.empty? && forbidden.empty?
 
       @rules << Rule.new(required, optional_or, forbidden)
     end
@@ -65,7 +80,13 @@ class Blacklist
     when /\Auserid:(\d+)\z/ then false
     when /\A-uploader:(\d+)\z/ then false
     when /\Auploader:(\d+)\z/ then false
-    else tag_set.include?(tag)
+    else
+      if tag.include?(':')
+        _category, bare_tag = tag.split(':', 2)
+        tag_set.include?(bare_tag)
+      else
+        tag_set.include?(tag)
+      end
     end
   end
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env ruby
 # frozen_string_literal: true
 
 # Canonical Logger for rubichiver-e621
@@ -47,6 +46,7 @@ module E621Archiver
         self.include_timestamp = timestamp
         self.include_context = context
         self.format = format
+        @write_mutex = Mutex.new
       end
 
       def resolve_level
@@ -69,13 +69,15 @@ module E621Archiver
             message: message
           }.merge(context)
 
-          output.puts(JSON.generate(entry))
+          line = JSON.generate(entry)
         else
-          formatted = format_message(level, message, context)
-          output.puts(formatted)
+          line = format_message(level, message, context)
         end
 
-        output.flush
+        @write_mutex.synchronize do
+          output.puts(line)
+          output.flush
+        end
       end
 
       def enabled?(level)

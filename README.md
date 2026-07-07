@@ -6,7 +6,7 @@ A Ruby CLI tool that downloads media from e621.net and writes XMP sidecar metada
 
 - Fetches post metadata from the e621 v2 JSON API (paginated, 320 per page)
 - Downloads media in original format (webm, avi, mov, png, jpg, etc.)
-- Writes `.xmp` sidecar files with `XMP:Rating` and `IPTC:Keywords` (categorized tags)
+- Writes `.xmp` sidecar files with `XMP:Rating` and `XMP:Subject` (categorized tags)
 - File-based API response caching (persistent across runs)
 - Threaded worker pool for concurrent downloads
 - e621 blacklist syntax support (`~OR`, `-negation`, `rating:`, `id:`)
@@ -63,7 +63,8 @@ API_KEY=your_e621_api_key
 Standard e621 blacklist syntax:
 
 ```
-gore -rating:s
+gore -rating:e
+~fox wolf
 rating:explicit
 ```
 

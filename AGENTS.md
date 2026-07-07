@@ -1,7 +1,7 @@
 # rubichiver-e621 — Agent Quick-Start
 
 ## System Overview
-A Ruby CLI tool that downloads media from e621.net, fetches post metadata via the e621 v2 JSON API (paginated, 320 per page), keeps files in original format, and writes XMP sidecar files (.xmp) with IPTC:Keywords + XMP:Rating. Runs as a one-shot batch job reading tag queries from a file.
+A Ruby CLI tool that downloads media from e621.net, fetches post metadata via the e621 v2 JSON API (paginated, 320 per page), keeps files in original format, and writes XMP sidecar files (.xmp) with XMP:Subject keywords + XMP:Rating. Runs as a one-shot batch job reading tag queries from a file.
 
 ## Tech Stack
 - **Language:** Ruby 3.x (no gems beyond stdlib)
@@ -47,7 +47,15 @@ ruby rubichiver-e621.rb -o ./custom_output -t ./my_tags.txt -c ./my_creds.txt -v
 ruby rubichiver-e621.rb --dry-run        # Show what would be done
 ruby rubichiver-e621.rb -j 4             # Worker threads (default: 2)
 ruby rubichiver-e621.rb --rate-limit 2   # API requests per second (default: 1)
+ruby rubichiver-e621.rb --notify https://ntfy.sh/my-topic   # POST JSON run report on completion
 ```
+
+## Alerting
+- Pass `--notify URL` to `POST` a JSON run report (event, success, interrupted,
+  counts, timestamp) to a webhook on completion — e.g. ntfy, Slack, or Discord
+  incoming webhook. Notification failures are logged but never abort the run.
+- The process exits non-zero (`1`) if the run was interrupted or any post
+  failed, so cron/monitoring can detect incomplete runs via exit code.
 
 ## Key Conventions
 - **Post discovery** — For each line in `tags.txt`, fetches matching posts from e621 v2 API (`/posts.json?tags=...&page=N&limit=320&v2=true&mode=extended`) with file-based JSON caching in `$output_dir/cache/`.
@@ -57,7 +65,7 @@ ruby rubichiver-e621.rb --rate-limit 2   # API requests per second (default: 1)
 - **Interrupt handling** — First Ctrl+C sets `$interrupted` flag to finish in-progress work; second Ctrl+C force-exits.
 - **Rate limiting** — `RateLimiter` class with configurable requests/sec; applied to all API calls (search + download).
 - **No transcoding** — Media kept in original format (webm, avi, mov, etc.). Only XMP sidecars are written.
-- **XMP sidecars** — ExifTool writes `.xmp` files with `XMP:Rating` (1-3) and `IPTC:Keywords` (`rating:label`, `category:tag` entries).
+- **XMP sidecars** — ExifTool writes `.xmp` files with `XMP:Rating` (1-3) and keyword metadata as `XMP:Subject` (`dc:subject`, the IPTC Core "Keywords" field) (`rating:label`, `category:tag` entries).
 - **Blacklist** — e621 blacklist syntax: `~OR` groups, `-negation`, `rating:`, `id:`. Applied before enqueueing.
 - **Unsupported formats** — SWF files skipped entirely.
 - **Error handling** — Retries with exponential backoff (3 attempts) on download; failures logged but don't halt batch.
