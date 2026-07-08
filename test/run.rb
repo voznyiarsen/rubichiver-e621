@@ -2,7 +2,7 @@ require 'tmpdir'
 require 'fileutils'
 
 # Run all tests from a throwaway directory so the script's bootstrap side
-# effects (creating ./e6archive, etc.) never touch the repo.
+# effects (creating ./e621-archive, etc.) never touch the repo.
 tmp = Dir.mktmpdir
 at_exit { FileUtils.remove_entry(tmp) rescue nil }
 Dir.chdir(tmp)

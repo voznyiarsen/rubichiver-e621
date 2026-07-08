@@ -51,7 +51,9 @@ NETWORK_ERRORS = [
   Net::ReadTimeout,
   Errno::ECONNRESET,
   Errno::ECONNREFUSED,
-  OpenSSL::SSL::SSLError
+  OpenSSL::SSL::SSLError,
+  Zlib::BufError,
+  Zlib::DataError
 ].freeze
 
 # Encapsulates the entire archiver: configuration, API discovery, downloading,
@@ -62,11 +64,12 @@ class Archiver
                 :rate_limiter, :blacklist, :existing_posts, :interrupted, :verbose,
                 :notify_url
 
-  def initialize(username: nil, api_key: nil, output_dir: './e6archive',
+  def initialize(username: nil, api_key: nil, output_dir: './e621-archive',
                  tags_file: './tags.txt', credentials_file: './api_credentials.txt',
                  blacklist_file: './blacklist.txt', dry_run: false,
                  thread_count: 2, rate_limit: 1, verbose: false,
-                 interrupted: false, rate_limiter: nil, notify_url: nil)
+                 interrupted: false, rate_limiter: nil, notify_url: nil,
+                 recheck_sidecars: false)
     @username = username
     @api_key = api_key
     @output_dir = output_dir
@@ -82,6 +85,7 @@ class Archiver
     @blacklist = nil
     @existing_posts = {}
     @notify_url = notify_url
+    @recheck_sidecars = recheck_sidecars
   end
 
   # --- Bootstrap / entry point -------------------------------------------
@@ -133,11 +137,6 @@ class Archiver
 
     start_time = Time.now
 
-    unless File.exist?(@tags_file)
-      log_error "Cannot open tags file", tags_file: @tags_file
-      exit 1
-    end
-
     stats = Stats.new
     processor = PostProcessor.new(
       rate_limiter: @rate_limiter,
@@ -148,11 +147,21 @@ class Archiver
       archiver: self
     )
 
-    if @dry_run
-      log_info "Dry run mode — discovering posts that would be archived (no files written)"
-    end
+    if @recheck_sidecars
+      log_info "Sidecar recheck mode — scanning existing files and validating sidecars"
+      recheck_all_sidecars(processor, stats)
+    else
+      unless File.exist?(@tags_file)
+        log_error "Cannot open tags file", tags_file: @tags_file
+        exit 1
+      end
 
-    process_tag_queries(processor, stats)
+      if @dry_run
+        log_info "Dry run mode — discovering posts that would be archived (no files written)"
+      end
+
+      process_tag_queries(processor, stats)
+    end
 
     processor.finish
     processor.wait
@@ -209,25 +218,29 @@ class Archiver
   end
 
   def install_signal_handlers
+    # NOTE: signal handlers run in Ruby's "trap context", where locking a Mutex
+    # (and thus the logger, which synchronizes writes) is forbidden and raises
+    # ThreadError. We write directly to $stderr for immediate feedback — it is
+    # safe in trap context (uses internal IO locks, not Thread::Mutex).
     trap('INT') do
       if @interrupted
-        log_warn "Force exiting..."
+        $stderr.puts "[Interrupt] Force exiting..."
         trap('INT', 'DEFAULT')
         Process.kill('INT', Process.pid)
       else
         @interrupted = true
-        log_warn "Interrupt received, finishing in-progress work... (press Ctrl+C again to force exit)"
+        $stderr.puts "[Interrupt] Graceful shutdown initiated, finishing in-progress work... (press Ctrl+C again to force exit)"
       end
     end
 
     trap('TERM') do
       if @interrupted
-        log_warn "Force exiting..."
+        $stderr.puts "[Interrupt] Force exiting..."
         trap('TERM', 'DEFAULT')
         Process.kill('TERM', Process.pid)
       else
         @interrupted = true
-        log_warn "Terminate received, finishing in-progress work... (send again to force exit)"
+        $stderr.puts "[Interrupt] Graceful shutdown initiated... (send again to force exit)"
       end
     end
   end
@@ -266,7 +279,7 @@ class Archiver
     unless force
       if File.exist?(cache_path)
         data = JSON.parse(File.read(cache_path))
-        log_debug "Using cached API response for: #{tags.join(' ')} (page #{page}, #{data&.size || 0} posts)"
+        log_debug "Using cached API response for: #{tags.join(' ')} (page #{page}, #{data&.size || 0} posts)", api: true
         return data
       end
     end
@@ -293,7 +306,7 @@ class Archiver
           http.request(request)
         rescue *NETWORK_ERRORS => e
           log_warn "API request error (attempt #{retries + 1}/#{MAX_RETRIES})",
-                   error: e.message, tags: tags.join(' '), page: page
+                   error: e.message, tags: tags.join(' '), page: page, api: true
           nil
         end
 
@@ -313,11 +326,11 @@ class Archiver
           posts = parsed.is_a?(Array) ? parsed : []
           break
         rescue JSON::ParserError => e
-          log_error "Failed to parse API response", error: e.message
+          log_error "Failed to parse API response", error: e.message, api: true
           return nil
         end
       elsif [429, 503].include?(response.code.to_i)
-        log_warn "API rate limited (#{response.code}), retrying...", tags: tags.join(' '), page: page
+        log_warn "API rate limited (#{response.code}), retrying...", tags: tags.join(' '), page: page, api: true
         retries += 1
         if retries < MAX_RETRIES
           delay = RETRY_BACKOFF * (2 ** retries) + rand * 0.5
@@ -326,7 +339,7 @@ class Archiver
         end
         next
       else
-        log_error "API search failed", tags: tags.join(' '), page: page, status: response.code
+        log_error "API search failed", tags: tags.join(' '), page: page, status: response.code, api: true
         return nil
       end
     end
@@ -334,14 +347,14 @@ class Archiver
     return nil unless posts
 
     File.write(cache_path, JSON.pretty_generate(posts))
-    log_debug "Cached API response: #{tags.join(' ')} (page #{page}, #{posts.size} posts)"
+    log_debug "Cached API response: #{tags.join(' ')} (page #{page}, #{posts.size} posts)", api: true
     posts
   end
 
   # Fetch all pages of posts for a single tag query from the API.
   def fetch_all_posts_for_query(query_tags, seen_ids, stats)
     query_str = query_tags.join(' ')
-    log_info "Fetching posts for: #{query_str}", query: query_str
+    log_info "Fetching posts for: #{query_str}", query: query_str, api: true
 
     # Always fetch page 1 fresh to check for new posts.
     fresh_p1 = api_search_posts(query_tags, 1, force: true)
@@ -359,13 +372,13 @@ class Archiver
       cached_ids = cached_p1.map { |p| p['id'] }
       new_ids = fresh_ids - cached_ids
       if new_ids.any?
-        log_info "New posts detected for: #{query_str} (#{new_ids.size} new), updating cache..."
+        log_info "New posts detected for: #{query_str} (#{new_ids.size} new), updating cache...", api: true
         needs_update = true
       else
-        log_debug "No new posts for: #{query_str}, using cached pages"
+        log_debug "No new posts for: #{query_str}, using cached pages", api: true
       end
     else
-      log_debug "No existing cache for: #{query_str}, performing full fetch"
+      log_debug "No existing cache for: #{query_str}, performing full fetch", api: true
       needs_update = true
     end
 
@@ -383,7 +396,7 @@ class Archiver
                 # missing/stale, fall back to a live fetch rather than silently
                 # dropping posts.
                 if cached.nil? && !needs_update
-                  log_debug "Cache miss for page #{page}, fetching live", query: query_str
+                  log_debug "Cache miss for page #{page}, fetching live", query: query_str, api: true
                   cached = api_search_posts(query_tags, page, force: true)
                 end
                 cached
@@ -442,6 +455,55 @@ class Archiver
     end
   end
 
+  # Recheck all existing sidecars in the output directory.
+  #
+  # Scans for media files (non-.xmp, non-.part), batches their post IDs into
+  # groups of up to BATCH_SIZE, fetches post metadata from e621 via a single
+  # API call per batch, and enqueues each post so the worker pool validates
+  # its sidecar and regenerates if missing or invalid.
+  BATCH_SIZE = 300
+  def recheck_all_sidecars(processor, stats)
+    media_files = Dir.children(@output_dir).select do |f|
+      next if f.start_with?('.') || f.end_with?('.xmp') || f.end_with?('.part')
+      File.file?(File.join(@output_dir, f))
+    end
+
+    if media_files.empty?
+      log_info "No media files found in output directory"
+      return
+    end
+
+    post_ids = Set.new
+    media_files.each do |file|
+      next unless file =~ /\A(\d+)\./
+      post_ids << $1.to_i
+    end
+
+    log_info "Found #{post_ids.size} unique posts to recheck"
+
+    unless @dry_run
+      FileUtils.mkdir_p(File.join(@output_dir, 'cache'))
+    end
+
+    ids = post_ids.to_a
+    total_batches = (ids.size.to_f / BATCH_SIZE).ceil
+
+    ids.each_slice(BATCH_SIZE).with_index do |id_batch, idx|
+      break if @interrupted
+
+      log_info "Recheck batch #{idx + 1}/#{total_batches} (#{id_batch.size} IDs)", batch: idx + 1, total_batches: total_batches, api: true
+      tag = "id:#{id_batch.join(',')}"
+      posts = api_search_posts([tag], 1, force: true)
+      next unless posts
+
+      posts.each do |post|
+        break if @interrupted
+        stats.increment(:total_posts)
+        processor.enqueue(post)
+      end
+    end
+  end
+
   # --- Download + sidecar -------------------------------------------------
 
   # Download media file with retries.
@@ -486,15 +548,15 @@ class Archiver
               File.rename(tmp_file, output_file)
               success = true
             else
-              log_error "MD5 mismatch for post #{post_id}", post_id: post_id, thread: thread_idx
+              log_error "MD5 mismatch for post #{post_id}", post_id: post_id, thread: thread_idx, api: true
             end
           else
-            log_error "Download failed", post_id: post_id, status: res.code, thread: thread_idx
+            log_error "Download failed", post_id: post_id, status: res.code, thread: thread_idx, api: true
           end
         end
       rescue *NETWORK_ERRORS => e
         log_warn "Network error downloading post #{post_id} (attempt #{retries + 1}/#{MAX_RETRIES}): #{e.message}",
-                 post_id: post_id, thread: thread_idx
+                 post_id: post_id, thread: thread_idx, api: true
       end
 
       return true if success
@@ -503,7 +565,7 @@ class Archiver
       retries += 1
       if retries < MAX_RETRIES
         delay = RETRY_BACKOFF * (2 ** retries) + rand * 0.5
-        log_debug "Retrying in #{format('%.1f', delay)}s...", post_id: post_id, retry_count: retries
+        log_debug "Retrying in #{format('%.1f', delay)}s...", post_id: post_id, retry_count: retries, api: true
         sleep(delay)
         break if @interrupted
       end
@@ -602,10 +664,10 @@ class Archiver
 
     response = http.request(request)
     unless response.is_a?(Net::HTTPSuccess)
-      log_warn "Alert notification failed", status: response&.code
+      log_warn "Alert notification failed", status: response&.code, api: true
     end
   rescue *NETWORK_ERRORS => e
-    log_warn "Alert notification failed: #{e.message}"
+    log_warn "Alert notification failed: #{e.message}", api: true
   end
 end
 
@@ -613,7 +675,7 @@ end
 
 if __FILE__ == $PROGRAM_NAME
   options = {
-    output: './e6archive',
+    output: './e621-archive',
     tags: './tags.txt',
     credentials: './api_credentials.txt',
     blacklist: './blacklist.txt',
@@ -628,21 +690,18 @@ if __FILE__ == $PROGRAM_NAME
     opts.banner = <<~USAGE
       Usage: rubichiver-e621.rb [OPTIONS]
 
-      Options:
-        -o, --output DIR      Output directory (default: ./e6archive)
-        -t, --tags FILE       Tags file (default: ./tags.txt)
-        -c, --credentials FILE  API credentials file (default: ./api_credentials.txt)
-        --dry-run             Show what would be done without downloading
-        -v, --verbose         Verbose output
-        --json                JSON log output (machine-parseable)
-        -h, --help            Show this help message
+      Modes:
+        default   Read tags from tags file, fetch matching posts, download media,
+                  and write XMP sidecars with XMP:Subject keywords + XMP:Rating.
+        --recheck-sidecars  Scan the output directory, fetch post metadata, and
+                  regenerate any missing or invalid XMP sidecars.
 
       The tool will:
         1. Read tags from the tags file (whitespace-separated tags per line)
         2. For each line, fetch matching posts from the e621 API (paginated, 320 per page)
         3. Filter posts against a blacklist file (e621 blacklist syntax)
         4. Download media files (images/videos)
-        5. Write XMP sidecar files with IPTC:Keywords (tags by category + rating)
+        5. Write XMP sidecar files with XMP:Subject (tags by category + rating)
         6. No transcoding — media files are kept in their original format
     USAGE
 
@@ -656,6 +715,7 @@ if __FILE__ == $PROGRAM_NAME
     opts.on('--rate-limit N', Float, 'API requests per second (default: 1)') { |v| options[:rate_limit] = v }
     opts.on('-b', '--blacklist FILE', 'Blacklist file (e621 syntax, default: ./blacklist.txt)') { |v| options[:blacklist] = v }
     opts.on('--notify URL', 'POST a JSON run report to URL on completion (e.g. ntfy/Slack/Discord webhook)') { |v| options[:notify] = v }
+    opts.on('--recheck-sidecars', 'Recheck all existing sidecars and regenerate missing/invalid ones') { options[:recheck_sidecars] = true }
     opts.on('-h', '--help', 'Show this help message') do
       puts opts
       exit 0
@@ -676,7 +736,8 @@ if __FILE__ == $PROGRAM_NAME
     thread_count: options[:threads],
     rate_limit: options[:rate_limit],
     verbose: options[:verbose],
-    notify_url: options[:notify]
+    notify_url: options[:notify],
+    recheck_sidecars: options[:recheck_sidecars]
   )
   archiver.install_signal_handlers
   archiver.run

@@ -29,7 +29,7 @@ rubichiver-e621/
 ├── api_credentials.txt   # API credentials (gitignored)
 ├── tags.txt              # Tag queries (gitignored)
 ├── blacklist.txt         # Blacklist rules (gitignored)
-└── e6archive/            # Default output directory (created at runtime)
+└── e621-archive/            # Default output directory (created at runtime)
     └── cache/            # API response cache (JSON files, persistent across runs)
 ```
 
@@ -39,7 +39,7 @@ rubichiver-e621/
 
 ## How to Run
 ```bash
-# Run (uses defaults: ./tags.txt, ./api_credentials.txt, ./e6archive)
+# Run (uses defaults: ./tags.txt, ./api_credentials.txt, ./e621-archive)
 ruby rubichiver-e621.rb
 
 # Common options
@@ -48,6 +48,7 @@ ruby rubichiver-e621.rb --dry-run        # Show what would be done
 ruby rubichiver-e621.rb -j 4             # Worker threads (default: 2)
 ruby rubichiver-e621.rb --rate-limit 2   # API requests per second (default: 1)
 ruby rubichiver-e621.rb --notify https://ntfy.sh/my-topic   # POST JSON run report on completion
+ruby rubichiver-e621.rb --recheck-sidecars   # Recheck all existing XMP sidecars, regenerate invalid ones
 ```
 
 ## Alerting

@@ -30,7 +30,7 @@ cd rubichiver-e621
 ruby rubichiver-e621.rb [OPTIONS]
 
 Options:
-  -o, --output DIR        Output directory (default: ./e6archive)
+  -o, --output DIR        Output directory (default: ./e621-archive)
   -t, --tags FILE         Tags file (default: ./tags.txt)
   -c, --credentials FILE  API credentials file (default: ./api_credentials.txt)
   --dry-run               Show what would be done without downloading

@@ -77,6 +77,8 @@ class PostProcessor
     file_url = post.dig('files', 'original', 'url')
     md5 = post.dig('files', 'meta', 'md5')
 
+    log_info "Thread #{thread_idx}: Processing post #{post_id}", post_id: post_id, thread: thread_idx
+
     if @archiver.interrupted
       @interrupt_mutex.synchronize { @interrupt_skipped += 1 }
       @stats.increment(:skipped_files)
@@ -84,37 +86,37 @@ class PostProcessor
     end
 
     unless file_url
-      log_debug "Post #{post_id}: No file URL, skipping", thread: thread_idx
+      log_debug "Thread #{thread_idx}: Post #{post_id} has no file URL, skipping", thread: thread_idx
       @stats.increment(:skipped_files)
       return
     end
 
     if UNSUPPORTED_EXTENSIONS.include?(file_ext.downcase)
-      log_info "Post #{post_id}: Skipping unsupported format (#{file_ext})", thread: thread_idx
+      log_info "Thread #{thread_idx}: Skipping post #{post_id} (unsupported format: #{file_ext})", thread: thread_idx
       @stats.increment(:skipped_files)
       return
     end
 
     if @dry_run
-      log_info "Would archive post #{post_id} (#{file_ext})", post_id: post_id, url: file_url, thread: thread_idx
+      log_info "Thread #{thread_idx}: Would archive post #{post_id} (#{file_ext})", post_id: post_id, url: file_url, thread: thread_idx
       return
     end
 
     existing_file = @archiver.existing_posts[post_id]
     if existing_file
       unless @archiver.sidecar_valid?(post)
-        log_info "Post #{post_id}: Sidecar missing or invalid, regenerating", post_id: post_id, thread: thread_idx
+        log_info "Thread #{thread_idx}: Post #{post_id} sidecar missing or invalid, regenerating", post_id: post_id, thread: thread_idx
         if @archiver.write_sidecar(existing_file, post)
-          log_info "Post #{post_id}: Successfully archived (auto-tagged)", post_id: post_id, thread: thread_idx
+          log_info "Thread #{thread_idx}: Post #{post_id} sidecar regenerated successfully", post_id: post_id, thread: thread_idx
           @stats.increment(:autotagged_files)
         else
-          log_error "Post #{post_id}: Failed to write sidecar", post_id: post_id, thread: thread_idx
+          log_error "Thread #{thread_idx}: Post #{post_id} sidecar regeneration failed", post_id: post_id, thread: thread_idx
           @stats.increment(:failed_files)
         end
         return
       end
 
-      log_debug "Post #{post_id}: Already exists and tagged (Post ID: #{post_id})", post_id: post_id, thread: thread_idx
+      log_info "Thread #{thread_idx}: Post #{post_id} sidecar valid, skipping", post_id: post_id, thread: thread_idx
       @stats.increment(:skipped_files)
       return
     end
@@ -124,16 +126,16 @@ class PostProcessor
     success = @archiver.download_media(file_url, output_file, post_id, md5, thread_idx: thread_idx)
 
     if success
-      log_info "Post #{post_id}: Writing XMP sidecar", post_id: post_id, thread: thread_idx
+      log_info "Thread #{thread_idx}: Writing XMP sidecar for post #{post_id}", post_id: post_id, thread: thread_idx
       if @archiver.write_sidecar(output_file, post)
-        log_info "Post #{post_id}: Successfully archived", post_id: post_id, thread: thread_idx
+        log_info "Thread #{thread_idx}: Post #{post_id} archived successfully", post_id: post_id, thread: thread_idx
         @stats.increment(:downloaded_files)
       else
-        log_error "Post #{post_id}: Failed to write XMP sidecar", post_id: post_id, thread: thread_idx
+        log_error "Thread #{thread_idx}: Post #{post_id} sidecar write failed", post_id: post_id, thread: thread_idx
         @stats.increment(:failed_files)
       end
     else
-      log_error "Post #{post_id}: Download failed", post_id: post_id, thread: thread_idx
+      log_error "Thread #{thread_idx}: Post #{post_id} download failed", post_id: post_id, thread: thread_idx
       @stats.increment(:failed_files)
     end
   end
