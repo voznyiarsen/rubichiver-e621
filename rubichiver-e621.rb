@@ -59,12 +59,13 @@ NETWORK_ERRORS = [
 # Encapsulates the entire archiver: configuration, API discovery, downloading,
 # and XMP sidecar writing. Replaces the previous global-mutable-state design.
 class Archiver
-  attr_accessor :username, :api_key, :output_dir, :tags_file, :credentials_file,
+  attr_accessor :username, :api_key, :output_dir, :cache_dir, :tags_file, :credentials_file,
                 :blacklist_file, :dry_run, :thread_count, :rate_limit,
                 :rate_limiter, :blacklist, :existing_posts, :interrupted, :verbose,
                 :notify_url
 
   def initialize(username: nil, api_key: nil, output_dir: './e621-archive',
+                 cache_dir: nil,
                  tags_file: './tags.txt', credentials_file: './api_credentials.txt',
                  blacklist_file: './blacklist.txt', dry_run: false,
                  thread_count: 2, rate_limit: 1, verbose: false,
@@ -73,6 +74,7 @@ class Archiver
     @username = username
     @api_key = api_key
     @output_dir = output_dir
+    @cache_dir = cache_dir || File.join(@output_dir, 'cache')
     @tags_file = tags_file
     @credentials_file = credentials_file
     @blacklist_file = blacklist_file
@@ -271,10 +273,9 @@ class Archiver
   # Retries on transient network errors and on rate-limit responses (429/503)
   # with exponential backoff before giving up.
   def api_search_posts(tags, page, force: false)
-    cache_dir = File.join(@output_dir, 'cache')
-    FileUtils.mkdir_p(cache_dir)
+    FileUtils.mkdir_p(@cache_dir)
     query_hash = Digest::SHA256.hexdigest("v2:" + tags.sort.join(' '))
-    cache_path = File.join(cache_dir, "api_posts_#{query_hash}_p#{page}.json")
+    cache_path = File.join(@cache_dir, "api_posts_#{query_hash}_p#{page}.json")
 
     unless force
       if File.exist?(cache_path)
@@ -361,9 +362,8 @@ class Archiver
     return [] unless fresh_p1
 
     # Check if there are new posts by comparing fresh page 1 with cached page 1.
-    cache_dir = File.join(@output_dir, 'cache')
     query_hash = Digest::SHA256.hexdigest("v2:" + query_tags.sort.join(' '))
-    cache_p1_path = File.join(cache_dir, "api_posts_#{query_hash}_p1.json")
+    cache_p1_path = File.join(@cache_dir, "api_posts_#{query_hash}_p1.json")
 
     needs_update = false
     if File.exist?(cache_p1_path)
@@ -482,7 +482,7 @@ class Archiver
     log_info "Found #{post_ids.size} unique posts to recheck"
 
     unless @dry_run
-      FileUtils.mkdir_p(File.join(@output_dir, 'cache'))
+      FileUtils.mkdir_p(@cache_dir)
     end
 
     ids = post_ids.to_a
@@ -716,6 +716,7 @@ if __FILE__ == $PROGRAM_NAME
     opts.on('-b', '--blacklist FILE', 'Blacklist file (e621 syntax, default: ./blacklist.txt)') { |v| options[:blacklist] = v }
     opts.on('--notify URL', 'POST a JSON run report to URL on completion (e.g. ntfy/Slack/Discord webhook)') { |v| options[:notify] = v }
     opts.on('--recheck-sidecars', 'Recheck all existing sidecars and regenerate missing/invalid ones') { options[:recheck_sidecars] = true }
+    opts.on('-C', '--cache-dir DIR', 'Cache directory for API responses (default: $output_dir/cache)') { |v| options[:cache_dir] = v }
     opts.on('-h', '--help', 'Show this help message') do
       puts opts
       exit 0
@@ -737,6 +738,7 @@ if __FILE__ == $PROGRAM_NAME
     rate_limit: options[:rate_limit],
     verbose: options[:verbose],
     notify_url: options[:notify],
+    cache_dir: options[:cache_dir],
     recheck_sidecars: options[:recheck_sidecars]
   )
   archiver.install_signal_handlers
