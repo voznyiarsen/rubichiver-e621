@@ -690,20 +690,16 @@ if __FILE__ == $PROGRAM_NAME
     opts.banner = <<~USAGE
       Usage: rubichiver-e621.rb [OPTIONS]
 
-      Modes:
-        default   Read tags from tags file, fetch matching posts, download media,
-                  and write XMP sidecars with XMP:Subject keywords + XMP:Rating.
-        --recheck-sidecars  Scan the output directory, fetch post metadata, and
-                  regenerate any missing or invalid XMP sidecars.
+      An e621.net media archiver. Reads tag queries, fetches matching post
+      metadata from the e621 v2 JSON API, downloads media and writes XMP
+      sidecar files (XMP:Subject keywords + XMP:Rating). No transcoding:
+      media files are kept in their original format.
 
-      The tool will:
-        1. Read tags from the tags file (whitespace-separated tags per line)
-        2. For each line, fetch matching posts from the e621 API (paginated, 320 per page)
-        3. Filter posts against a blacklist file (e621 blacklist syntax)
-        4. Download media files (images/videos)
-        5. Write XMP sidecar files with XMP:Subject (tags by category + rating)
-        6. No transcoding — media files are kept in their original format
+      Use --recheck-sidecars to scan the output directory and regenerate any
+      missing or invalid XMP sidecars (e.g. after a tool upgrade).
     USAGE
+
+    opts.separator "Options:"
 
     opts.on('-o', '--output DIR', 'Output directory') { |v| options[:output] = v }
     opts.on('-t', '--tags FILE', 'Tags file') { |v| options[:tags] = v }
