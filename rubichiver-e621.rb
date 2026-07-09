@@ -691,9 +691,9 @@ if __FILE__ == $PROGRAM_NAME
       Usage: rubichiver-e621.rb [OPTIONS]
 
       An e621.net media archiver. Reads tag queries, fetches matching post
-      metadata from the e621 v2 JSON API, downloads media and writes XMP
-      sidecar files (XMP:Subject keywords + XMP:Rating). No transcoding:
-      media files are kept in their original format.
+      metadata from the e621 v2 JSON API, downloads media files in their
+      original format and writes XMP sidecar files (XMP:Subject keywords
+      + XMP:Rating).
 
       Use --recheck-sidecars to scan the output directory and regenerate any
       missing or invalid XMP sidecars (e.g. after a tool upgrade).
