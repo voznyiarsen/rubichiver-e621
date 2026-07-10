@@ -1,0 +1,23 @@
+# API credentials
+e621-api-credentials.txt
+gelbooru-api-credentials.txt
+
+# User data
+tags.txt
+blacklist.txt
+
+# Output directories
+e621-archive/
+gelbooru-archive/
+
+# Cache
+cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor temp files
+*.swp
+*.swo
+*~
