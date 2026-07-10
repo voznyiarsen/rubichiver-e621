@@ -3,5 +3,5 @@
 source 'https://rubygems.org'
 
 # rubichiver - Unified booru media archiver
-# Uses Ruby stdlib only; no gems required at runtime.
+# Uses Ruby stdlib; zero runtime dependencies.
 # Minitest is used for testing (stdlib in Ruby 3.x).

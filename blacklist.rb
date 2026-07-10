@@ -1,5 +1,18 @@
 # frozen_string_literal: true
 
+# Parses and evaluates e621-style blacklist rules.
+#
+# Each non-blank, non-comment line is a rule.  Tags on the same line are AND'd
+# unless prefixed with ~ (OR group) or - (negation).  If a ~group exists, at
+# least one member must match.  If a -tag is present, the rule does NOT match.
+#
+#   gore                  → blacklist all gore posts
+#   female fox nude       → blacklist if ALL three are present
+#   pokémon -pikachu      → blacklist pokémon UNLESS pikachu is also present
+#   ~wolf ~lion           → blacklist if EITHER wolf OR lion is present
+#   rating:e              → blacklist all explicit posts
+#   id:12345              → blacklist a specific post
+#
 class Blacklist
   Rule = Struct.new(:required, :optional_or, :forbidden)
 
@@ -56,6 +69,8 @@ class Blacklist
         log_warn "Blacklist rule contains unsupported tag(s), ignored", rule: line, ignored: unsupported.join(', ')
       end
 
+      # A rule with only unsupported components cannot match; discard it
+      # to avoid blacklisting everything.
       next if required.empty? && optional_or.empty? && forbidden.empty?
 
       @rules << Rule.new(required, optional_or, forbidden)
@@ -68,6 +83,8 @@ class Blacklist
       RATING_ABBREV[rating] == RATING_ABBREV[$1]
     when /\Aid:(\d+)\z/
       post_id == $1.to_i
+    when /\A(?:-)?(?:userid|uploader):\d+\z/
+      false
     else
       return true if tag_set.include?(tag)
       if tag.include?(':')

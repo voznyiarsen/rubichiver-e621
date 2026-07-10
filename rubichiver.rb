@@ -40,7 +40,7 @@ if __FILE__ == $PROGRAM_NAME
     puts "  -o, --output DIR             Output directory"
     puts "  -t, --tags FILE              Tags file (default: ./tags.txt)"
     puts "  -c, --credentials FILE       API credentials file"
-    puts "      --dry-run                Show what would be done without downloading"
+    puts "      --dry-run                Preview posts that would be archived"
     puts "  -v, --verbose                Verbose output"
     puts "      --json                   JSON log output (machine-parseable)"
     puts "  -j, --threads N              Number of worker threads (default: 2)"
@@ -79,14 +79,14 @@ if __FILE__ == $PROGRAM_NAME
     opts.on('-o', '--output DIR', 'Output directory') { |v| options[:output] = v }
     opts.on('-t', '--tags FILE', 'Tags file (default: ./tags.txt)') { |v| options[:tags] = v }
     opts.on('-c', '--credentials FILE', "API credentials file (default: ./e621-api-credentials.txt for e621, ./gelbooru-api-credentials.txt for gelbooru)") { |v| options[:credentials] = v }
-    opts.on('--dry-run', 'Show what would be done without downloading') { options[:dry_run] = true }
+    opts.on('--dry-run', 'Preview posts that would be archived') { options[:dry_run] = true }
     opts.on('-v', '--verbose', 'Verbose output') { options[:verbose] = true }
     opts.on('--json', 'JSON log output (machine-parseable)') { options[:json] = true }
     opts.on('-j', '--threads N', Integer, 'Number of worker threads (default: 2)') { |v| options[:threads] = v }
     opts.on('--rate-limit N', Float, 'API requests per second (default: 1)') { |v| options[:rate_limit] = v }
     opts.on('-b', '--blacklist FILE', 'Blacklist file (e621 syntax, default: ./blacklist.txt)') { |v| options[:blacklist] = v }
     opts.on('--notify URL', 'POST a JSON run report to URL on completion (e.g. ntfy/Slack/Discord webhook)') { |v| options[:notify] = v }
-    opts.on('--recache-post-tags', 'Refresh local tag cache for all existing posts from API (no sidecar writes)') { options[:recache_post_tags] = true }
+    opts.on('--recache-post-tags', 'Refresh local tag cache for all existing posts from API') { options[:recache_post_tags] = true }
     opts.on('-C', '--cache-dir DIR', 'Cache directory for API responses (default: $output_dir/cache)') { |v| options[:cache_dir] = v }
 
     opts.on('-h', '--help', 'Show this help message') do

@@ -4,7 +4,7 @@
 A Ruby CLI tool that downloads media from e621.net and Gelbooru, fetches post metadata via their respective JSON APIs, keeps files in original format, and writes XMP sidecar files (.xmp) with categorized keywords + rating. Runs as a one-shot batch job reading tag queries from a file. Unified from separate `rubichiver-e621` and `rubichiver-gelbooru` gems.
 
 ## Tech Stack
-- **Language:** Ruby 3.x (stdlib only, no runtime gems)
+- **Language:** Ruby 3.x (stdlib, zero runtime dependencies)
 - **External Tools:** ExifTool (XMP sidecar writing)
 - **APIs:**
   - e621.net v2 JSON API (`/posts.json?page=N&limit=320&v2=true&mode=extended`) — rate limited 1 req/s
@@ -21,7 +21,7 @@ rubichiver/
 ├── logger.rb               # Structured logging (JSON + human)
 ├── post_processor.rb       # Worker pool + Stats
 ├── rate_limiter.rb         # Thread-safe API rate limiter
-├── Gemfile                 # (no runtime deps)
+├── Gemfile                 # (zero runtime dependencies)
 ├── e621-api-credentials.txt     # e621: USERNAME= / API_KEY= (gitignored)
 ├── gelbooru-api-credentials.txt # Gelbooru: USER_ID= / API_KEY= / USERNAME= (gitignored)
 ├── tags.txt                # Tag queries (gitignored)
@@ -191,12 +191,12 @@ ruby rubichiver.rb --site gelbooru [OPTIONS]
 - **Parallelism** — `PostProcessor` worker pool, configurable thread count
 - **Interrupt handling** — first Ctrl+C graceful shutdown, second force exit
 - **Rate limiting** — `RateLimiter` class with configurable requests/sec
-- **No transcoding** — media kept in original format; only XMP sidecars written
+- **Original formats preserved** — media kept as-is alongside XMP sidecars
 - **XMP sidecars** — `XMP:Rating` (1-3) + categorized keywords (`category:tag`) via ExifTool
 - **Blacklist** — e621 syntax: `~OR` groups, `-negation`, `rating:`, `id:`; applied per-post before enqueue
 - **Unsupported formats** — SWF files skipped
 - **Error handling** — retries with exponential backoff (3 attempts) on network errors
-- **Notification** — `--notify URL` POSTs JSON report; failures logged never abort
+- **Notification** — `--notify URL` POSTs JSON report; failures logged without aborting
 - **Exit codes** — `0` success, `1` interrupted or any failure
 
 ## Testing

@@ -117,7 +117,7 @@ class PostProcessor
         log_info "Thread #{thread_idx}: Post #{post_id} sidecar missing or invalid, regenerating", post_id: post_id, thread: thread_idx
         result = @archiver.write_sidecar(existing_file, post)
         if result == :skipped
-          log_info "Thread #{thread_idx}: Post #{post_id} sidecar skipped (no rating)", post_id: post_id, thread: thread_idx
+          log_info "Thread #{thread_idx}: Post #{post_id} sidecar skipped (unrated)", post_id: post_id, thread: thread_idx
           @stats.increment(:skipped_files)
         elsif result
           log_info "Thread #{thread_idx}: Post #{post_id} sidecar regenerated successfully", post_id: post_id, thread: thread_idx
@@ -142,7 +142,7 @@ class PostProcessor
       log_info "Thread #{thread_idx}: Writing XMP sidecar for post #{post_id}", post_id: post_id, thread: thread_idx
       result = @archiver.write_sidecar(output_file, post)
       if result == :skipped
-        log_info "Thread #{thread_idx}: Post #{post_id} sidecar write skipped (no rating)", post_id: post_id, thread: thread_idx
+        log_info "Thread #{thread_idx}: Post #{post_id} sidecar write skipped (unrated)", post_id: post_id, thread: thread_idx
         @stats.increment(:skipped_files)
       elsif result
         log_info "Thread #{thread_idx}: Post #{post_id} archived successfully", post_id: post_id, thread: thread_idx

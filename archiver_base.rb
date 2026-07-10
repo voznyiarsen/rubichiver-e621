@@ -129,9 +129,9 @@ class Archiver
         exit 1
       end
 
-      if @dry_run
-        log_info "Dry run mode — discovering posts that would be archived (no files written)"
-      end
+    if @dry_run
+      log_info "Dry run mode — discovering posts that would be archived"
+    end
 
       process_tag_queries(processor, stats)
     end
@@ -162,7 +162,7 @@ class Archiver
       logger.info "Files blacklisted: #{stats.blacklisted_files}", blacklisted: stats.blacklisted_files
     end
     if @dry_run
-      logger.info "DRY RUN — no files were written", dry_run: true
+      logger.info "DRY RUN — preview mode", dry_run: true
     end
     logger.info "Throttled requests (API + downloads): #{total_requests}", request_count: total_requests
     logger.info "Time elapsed: #{format('%.2f', elapsed)}s", elapsed_seconds: elapsed.round(2)

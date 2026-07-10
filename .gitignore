@@ -13,6 +13,10 @@ gelbooru-archive/
 # Cache
 cache/
 
+# Temp / testing
+temporary/
+testing_tags.txt
+
 # OS files
 .DS_Store
 Thumbs.db
