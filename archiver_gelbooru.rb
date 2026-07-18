@@ -40,6 +40,15 @@ TAG_PREFIX_MAP = {
   'rating' => 'rating'
 }.freeze
 
+GELBOORU_TAG_TYPE_MAP = {
+  0 => 'general',
+  1 => 'artist',
+  3 => 'copyright',
+  4 => 'character',
+  5 => 'species',
+  6 => 'meta'
+}.freeze
+
 class GelbooruArchiver < Archiver
   def default_output_dir
     './gelbooru-archive'
@@ -283,6 +292,8 @@ class GelbooruArchiver < Archiver
       page += 1
     end
 
+    resolve_tag_types_for_posts(all_posts)
+
     all_posts
   end
 
@@ -351,11 +362,64 @@ class GelbooruArchiver < Archiver
         category = TAG_PREFIX_MAP[prefix] || 'general'
         categories[category] << name
       else
-        categories['general'] << tag
+        category = tag_type_cache[tag] || 'general'
+        categories[category] << tag
       end
     end
 
     categories
+  end
+
+  def tag_type_cache
+    @tag_type_cache ||= {}
+  end
+
+  def resolve_tag_types(tag_names)
+    return if tag_names.empty?
+    ensure_rate_limiter
+
+    cache = tag_type_cache
+    unknown = tag_names.reject { |t| cache.key?(t) }
+    return if unknown.empty?
+
+    unknown.each_slice(100) do |batch|
+      @rate_limiter.throttle!
+      uri = URI("#{GELBOORU_API_BASE}#{GELBOORU_API_PATH}")
+      params = {
+        page: 'dapi', s: 'tag', q: 'index',
+        names: batch.join(' '),
+        json: 1,
+        api_key: @api_key, user_id: @user_id
+      }
+      uri.query = URI.encode_www_form(params)
+
+      response = http_get(uri, read_timeout: 30)
+      next unless response.is_a?(Net::HTTPSuccess)
+
+      data = JSON.parse(response.body) rescue next
+      next unless data.is_a?(Hash)
+
+      tags = data['tag']
+      next unless tags
+
+      tags = [tags] unless tags.is_a?(Array)
+
+      tags.each do |tag|
+        next unless tag.is_a?(Hash)
+        name = tag['name']
+        type = tag['type']
+        next unless name && type
+        cache[name] = GELBOORU_TAG_TYPE_MAP[type.to_i] || 'general'
+      end
+    end
+  end
+
+  def resolve_tag_types_for_posts(posts)
+    unique_tags = Set.new
+    posts.each do |post|
+      (post['tags'] || '').split.each { |t| unique_tags << t }
+    end
+    resolve_tag_types(unique_tags.to_a)
   end
 
   def extract_post_tags(post)
