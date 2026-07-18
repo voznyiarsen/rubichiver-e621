@@ -6,6 +6,7 @@ require 'set'
 require 'net/http'
 require 'uri'
 require 'open3'
+require_relative 'dns_cache'
 
 MAX_RETRIES = 3
 RETRY_BACKOFF = 1
